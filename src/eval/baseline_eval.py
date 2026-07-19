@@ -29,11 +29,12 @@ from dotenv import load_dotenv
 from rouge_score import rouge_scorer
 
 from src.eval.prompts import build_messages
+from src.model_utils import BASE_MODEL_NAME, get_bnb_config, load_tokenizer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TEST_PATH = PROJECT_ROOT / "data" / "processed" / "test.csv"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "outputs" / "metrics" / "baseline_results.json"
-DEFAULT_MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
+DEFAULT_MODEL_NAME = BASE_MODEL_NAME
 WANDB_PROJECT = "ambient-clinical-scribe"
 
 
@@ -53,24 +54,13 @@ def load_model_and_tokenizer(model_name: str, hf_token: str | None):
     Returns:
         (model, tokenizer) ready for generation.
     """
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM
 
-    quant_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, token=hf_token)
-    tokenizer.padding_side = "left"
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = load_tokenizer(model_name, hf_token, padding_side="left")
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        quantization_config=quant_config,
+        quantization_config=get_bnb_config(),
         device_map="auto",
         token=hf_token,
     )
