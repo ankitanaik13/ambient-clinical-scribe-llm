@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Data (raw MTS-Dialog CSVs are fetched by src/data/load_data.py, not committed)
+data/raw/
+
+# Model weights / checkpoints
+*.pt
+*.bin
+*.safetensors
+models/
+wandb/
+
+# Misc
+.DS_Store
+.venv/
+venv/

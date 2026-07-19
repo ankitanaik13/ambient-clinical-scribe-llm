@@ -1,0 +1,65 @@
+{
+  "train": {
+    "split": "train",
+    "n_rows": 1201,
+    "n_null_dialogue": 0,
+    "n_null_note": 0,
+    "n_empty_dialogue": 0,
+    "n_empty_note": 0,
+    "n_duplicate_dialogue_note_pairs": 1,
+    "dialogue_word_count": {
+      "mean": 105.7,
+      "median": 64.0,
+      "min": 6,
+      "max": 1509
+    },
+    "note_word_count": {
+      "mean": 40.6,
+      "median": 14.0,
+      "min": 1,
+      "max": 1020
+    }
+  },
+  "val": {
+    "split": "val",
+    "n_rows": 100,
+    "n_null_dialogue": 0,
+    "n_null_note": 0,
+    "n_empty_dialogue": 0,
+    "n_empty_note": 0,
+    "n_duplicate_dialogue_note_pairs": 0,
+    "dialogue_word_count": {
+      "mean": 90.0,
+      "median": 54.5,
+      "min": 6,
+      "max": 630
+    },
+    "note_word_count": {
+      "mean": 36.1,
+      "median": 15.0,
+      "min": 1,
+      "max": 295
+    }
+  },
+  "test": {
+    "split": "test",
+    "n_rows": 400,
+    "n_null_dialogue": 0,
+    "n_null_note": 0,
+    "n_empty_dialogue": 0,
+    "n_empty_note": 0,
+    "n_duplicate_dialogue_note_pairs": 0,
+    "dialogue_word_count": {
+      "mean": 102.9,
+      "median": 63.5,
+      "min": 8,
+      "max": 978
+    },
+    "note_word_count": {
+      "mean": 39.0,
+      "median": 13.0,
+      "min": 1,
+      "max": 565
+    }
+  }
+}

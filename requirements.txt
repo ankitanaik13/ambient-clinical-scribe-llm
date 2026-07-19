@@ -1,0 +1,26 @@
+# --- Phase 1: data pipeline (already present in base conda env as of this writing) ---
+pandas>=2.0
+numpy>=1.24
+requests>=2.31
+python-dotenv>=1.0
+
+# --- Phase 2: baseline zero-shot evaluation ---
+torch>=2.1
+transformers>=4.40
+bitsandbytes>=0.43
+accelerate>=0.30
+rouge-score>=0.1.2
+wandb>=0.17
+
+# --- Phase 3: QLoRA fine-tuning ---
+peft>=0.11
+trl>=0.9
+
+# --- Phase 4: LLM-judge comparison + report ---
+anthropic>=0.28
+matplotlib>=3.8
+
+# --- Phase 5: serving ---
+fastapi>=0.111
+uvicorn>=0.30
+# vllm>=0.5  # optional, only needed on a rented GPU for src/serve/serve_vllm.py
