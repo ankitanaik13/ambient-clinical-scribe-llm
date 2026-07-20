@@ -15,11 +15,17 @@ BASE_MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 
 def get_bnb_config():
-    """4-bit NF4, double-quantized, bf16-compute BitsAndBytesConfig.
+    """4-bit NF4, double-quantized, fp16-compute BitsAndBytesConfig.
 
     Used identically to load the base model for zero-shot baseline generation (Phase 2)
     and for QLoRA fine-tuning (Phase 3), so the frozen base weights are read through the
     same quantization in both.
+
+    Compute dtype is float16, not bfloat16: a T4 GPU (Turing, sm_75 -- the free-tier Colab
+    GPU this project targets) has no bf16 tensor-core support, so bf16 compute silently
+    falls back to a slower path there for no numerical benefit. float16 is what T4 actually
+    accelerates. On an Ampere+ GPU (A10/A100/L4/24GB+) this can be switched to
+    torch.bfloat16 for better numerical stability with no speed cost.
     """
     import torch
     from transformers import BitsAndBytesConfig
@@ -27,7 +33,7 @@ def get_bnb_config():
     return BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
     )
 
