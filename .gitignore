@@ -5,6 +5,7 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+.pytest_cache/
 
 # Data (raw MTS-Dialog CSVs are fetched by src/data/load_data.py, not committed)
 data/raw/
