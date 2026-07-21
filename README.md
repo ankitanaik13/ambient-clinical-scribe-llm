@@ -99,7 +99,7 @@ baseline_results.json  finetuned_results.json
               v
    +--------------------------------------+
    |  src/eval/llm_judge.py                |
-   |  claude-sonnet-4-6 as judge:           |
+   |  gemini-2.5-flash as judge:            |
    |  completeness, factual correctness,    |
    |  hallucination, structural adherence   |
    +--------------------------------------+
@@ -150,7 +150,7 @@ note.
 | Fine-tuning | `peft` (LoRA), `trl` (`SFTTrainer`) |
 | Experiment tracking | Weights & Biases |
 | Automatic metrics | `rouge-score` |
-| LLM-judge + report | Anthropic API (`claude-sonnet-4-6`), `matplotlib` |
+| LLM-judge + report | Gemini API via `google-genai` (`gemini-2.5-flash`), `matplotlib` |
 | Serving | FastAPI, `uvicorn`, `vllm` (optional, GPU-only path) |
 | Testing | `pytest`, FastAPI `TestClient` |
 
@@ -189,7 +189,7 @@ Fill in:
 |---|---|
 | `HF_TOKEN` | `baseline_eval.py`, `finetune.py` — Llama 3 is a gated HF model |
 | `WANDB_API_KEY` | `baseline_eval.py`, `finetune.py`, `finetuned_eval.py` — experiment logging |
-| `ANTHROPIC_API_KEY` | `llm_judge.py` — LLM-judge scoring |
+| `GEMINI_API_KEY` | `llm_judge.py` — LLM-judge scoring (Google AI Studio, free tier, no credit card required) |
 
 `.env` is gitignored; never commit it.
 

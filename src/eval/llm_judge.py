@@ -1,17 +1,31 @@
-"""LLM-as-judge scoring of generated clinical notes, using the Anthropic API.
+"""LLM-as-judge scoring of generated clinical notes, using Google's Gemini API.
 
 Scores each (dialogue, generated_note) pair from a baseline_eval.py / finetuned_eval.py
 results JSON on four dimensions -- completeness, factual correctness, hallucination
-presence, and structural adherence -- as structured JSON, via Claude's `output_config.format`
-(json_schema) so every response is guaranteed to parse. Grading is anchored to the dialogue
-transcript (the actual source of truth for what happened in the encounter), not the reference
-note, since the reference is a single human-written example of an acceptable note, not ground
-truth for hallucination detection.
+presence, and structural adherence -- as structured JSON. Grading is anchored to the
+dialogue transcript (the actual source of truth for what happened in the encounter), not
+the reference note, since the reference is a single human-written example of an acceptable
+note, not ground truth for hallucination detection.
+
+Uses gemini-2.5-flash via the `google-genai` SDK (the current official SDK -- NOT the
+deprecated `google-generativeai` package). This project originally used the Anthropic API
+here; it was switched to Gemini specifically because Google AI Studio's free tier requires
+no credit card, which matters for a portfolio project with no billing account. Within
+Google's free-tier models, gemini-2.5-flash was picked for having the highest free daily
+quota available, since this project judges up to 800 examples total (baseline + fine-tuned,
+400 each) -- quota headroom matters more than raw model capability for a grading task like
+this one.
+
+Structured output is enforced via `response_mime_type="application/json"` +
+`response_schema=JudgeScore` (a Pydantic model) on GenerateContentConfig -- Gemini's
+equivalent of the structured-output approach the Anthropic version used
+(`output_config.format`/json_schema). The rubric and JSON shape are otherwise unchanged
+from that version.
 
 Run this once against outputs/metrics/baseline_results.json and once against
 outputs/metrics/finetuned_results.json -- src/eval/generate_report.py then compares the two.
 
-Reads ANTHROPIC_API_KEY from .env -- never hardcode it.
+Reads GEMINI_API_KEY from .env -- never hardcode it.
 
 Run as:
     python -m src.eval.llm_judge --results_path outputs/metrics/baseline_results.json
@@ -28,13 +42,14 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_PATH = PROJECT_ROOT / "outputs" / "metrics" / "baseline_results.json"
 
-# claude-sonnet-4-6 as specified for this project. It's a currently active model
-# (see Anthropic's model catalog) -- not a placeholder or typo.
-JUDGE_MODEL = "claude-sonnet-4-6"
+# gemini-2.5-flash: highest free-tier daily quota among Google AI Studio's models, chosen
+# specifically for grading up to 800 examples per full baseline+finetuned comparison run.
+JUDGE_MODEL = "gemini-2.5-flash"
 
 JUDGE_SYSTEM_PROMPT = """You are an expert clinical documentation auditor. You will be shown a \
 doctor-patient dialogue transcript and a clinical note section an AI system generated from it, \
@@ -76,26 +91,64 @@ Reference note (human-written, for context only -- not ground truth):
 Generated note to evaluate:
 {generated_note}"""
 
-JUDGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "completeness": {"type": "integer"},
-        "factual_correctness": {"type": "integer"},
-        "hallucination_present": {"type": "boolean"},
-        "hallucinated_claims": {"type": "array", "items": {"type": "string"}},
-        "structural_adherence": {"type": "integer"},
-        "rationale": {"type": "string"},
-    },
-    "required": [
-        "completeness",
-        "factual_correctness",
-        "hallucination_present",
-        "hallucinated_claims",
-        "structural_adherence",
-        "rationale",
-    ],
-    "additionalProperties": False,
-}
+
+class JudgeScore(BaseModel):
+    """Structured judge output -- passed to Gemini as `response_schema`."""
+
+    completeness: int
+    factual_correctness: int
+    hallucination_present: bool
+    hallucinated_claims: list[str]
+    structural_adherence: int
+    rationale: str
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Detect a 429 (rate limit / quota exceeded) error, defensively.
+
+    Checks the google-genai SDK's documented `.code` attribute on APIError first, and
+    falls back to substring-matching the exception's message. The fallback exists because
+    this project could not verify the exact exception shape against a live 429 response
+    (no GEMINI_API_KEY was available during development) -- string-matching is a hedge
+    against that, not the primary signal.
+    """
+    code = getattr(exc, "code", None)
+    if code == 429:
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in ("429", "resource_exhausted", "rate limit", "quota"))
+
+
+def call_with_retry(fn, max_retries: int = 5, base_delay: float = 5.0, max_delay: float = 60.0):
+    """Call fn(), retrying with exponential backoff on rate-limit errors only.
+
+    The free tier's requests-per-minute cap means a burst of ~400 judge calls will likely
+    hit a 429 at some point -- this retries those with backoff instead of aborting the run.
+    Non-rate-limit errors are re-raised immediately (judge_one handles them per-example).
+
+    Args:
+        fn: Zero-arg callable making the API call.
+        max_retries: Max retry attempts after the first try.
+        base_delay: Initial backoff delay in seconds.
+        max_delay: Cap on backoff delay.
+
+    Returns:
+        fn()'s return value.
+    """
+    from google.genai import errors
+
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except errors.APIError as exc:
+            if not _is_rate_limit_error(exc) or attempt == max_retries:
+                raise
+            delay = min(base_delay * (2**attempt), max_delay)
+            print(
+                f"  [rate limited] retrying in {delay:.0f}s "
+                f"(attempt {attempt + 1}/{max_retries})..."
+            )
+            time.sleep(delay)
 
 
 def judge_one(
@@ -104,63 +157,67 @@ def judge_one(
     reference_note: str,
     generated_note: str,
     model: str = JUDGE_MODEL,
-    effort: str = "low",
 ) -> dict | None:
-    """Score a single generated note with Claude, as structured JSON.
+    """Score a single generated note with Gemini, as structured JSON.
 
     Args:
-        client: An anthropic.Anthropic client.
+        client: A google.genai.Client.
         dialogue: The source dialogue transcript.
         reference_note: The human-written reference note (context only).
         generated_note: The note to evaluate.
         model: Judge model id.
-        effort: output_config effort level. Defaults to "low" -- this is a bulk grading task
-            run over hundreds of examples, not a task that benefits much from deep reasoning,
-            so we trade away Sonnet 4.6's "high" default for lower cost/latency at this scale.
 
     Returns:
-        The parsed judge score dict, or None if the call failed or was refused (logged, not
-        raised, so one bad example doesn't abort a run of hundreds).
+        The parsed judge score dict, or None if the call failed, was rate-limited past
+        max_retries, was blocked, or returned unparseable output -- logged, not raised, so
+        one bad example doesn't abort a run of hundreds.
     """
-    import anthropic
+    from google.genai import types
+
+    def _call():
+        return client.models.generate_content(
+            model=model,
+            contents=USER_PROMPT_TEMPLATE.format(
+                dialogue=dialogue,
+                reference_note=reference_note,
+                generated_note=generated_note,
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=JUDGE_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=JudgeScore,
+                # Bulk grading over hundreds of examples doesn't need Gemini 2.5 Flash's
+                # dynamic thinking -- disabling it keeps latency/cost down, mirroring this
+                # project's earlier low-effort choice when the judge was Claude Sonnet.
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
 
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=1024,
-            system=JUDGE_SYSTEM_PROMPT,
-            output_config={
-                "effort": effort,
-                "format": {"type": "json_schema", "schema": JUDGE_SCHEMA},
-            },
-            messages=[
-                {
-                    "role": "user",
-                    "content": USER_PROMPT_TEMPLATE.format(
-                        dialogue=dialogue,
-                        reference_note=reference_note,
-                        generated_note=generated_note,
-                    ),
-                }
-            ],
-        )
-    except anthropic.APIError as exc:
+        response = call_with_retry(_call)
+    except Exception as exc:
         print(f"  [judge_one] API error, skipping example: {exc}")
         return None
 
-    if response.stop_reason == "refusal":
-        print("  [judge_one] judge refused to score this example, skipping")
+    if not response.candidates:
+        print("  [judge_one] no candidates in response (possibly blocked), skipping")
         return None
 
-    text = next((block.text for block in response.content if block.type == "text"), None)
-    if text is None:
-        print("  [judge_one] no text block in judge response, skipping")
+    finish_reason = getattr(response.candidates[0], "finish_reason", None)
+    if finish_reason is not None and finish_reason != types.FinishReason.STOP:
+        print(f"  [judge_one] non-STOP finish_reason={finish_reason}, skipping")
         return None
 
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        return parsed.model_dump() if isinstance(parsed, BaseModel) else dict(parsed)
+
+    # Fall back to manual JSON parsing if `.parsed` wasn't populated -- a hedge against an
+    # SDK version where auto-parsing behaves differently than verified here.
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        print("  [judge_one] judge response was not valid JSON, skipping")
+        return json.loads(response.text)
+    except (json.JSONDecodeError, TypeError):
+        print("  [judge_one] response was not valid JSON, skipping")
         return None
 
 
@@ -168,7 +225,7 @@ def summarize_scores(scores: list[dict]) -> dict:
     """Aggregate per-example judge scores into summary statistics.
 
     Args:
-        scores: List of successfully-parsed judge score dicts (see JUDGE_SCHEMA).
+        scores: List of successfully-parsed judge score dicts (see JudgeScore).
 
     Returns:
         Dict with mean completeness/factual_correctness/structural_adherence and the
@@ -199,9 +256,8 @@ def run_judge(
     results_path: Path,
     output_path: Path | None = None,
     model: str = JUDGE_MODEL,
-    effort: str = "low",
     sample_size: int | None = None,
-    sleep_between_calls: float = 0.0,
+    sleep_between_calls: float = 4.0,
 ) -> dict:
     """Judge every example in a baseline_eval.py / finetuned_eval.py results file.
 
@@ -211,20 +267,21 @@ def run_judge(
         output_path: Where to write judge scores. Defaults to a sibling
             "<source>_judge_scores.json" file (see default_output_path).
         model: Judge model id.
-        effort: output_config effort level passed to judge_one.
         sample_size: If set, judge only a random sample of this many examples.
-        sleep_between_calls: Seconds to sleep between API calls, to stay under rate limits
-            on large runs.
+        sleep_between_calls: Seconds to sleep between API calls. Defaults to a
+            conservative 4s to proactively stay under the free tier's per-minute request
+            cap -- call_with_retry is the real safety net if this still isn't enough, but
+            spacing requests out means fewer 429s to retry in the first place.
 
     Returns:
         The results dict that was also written to output_path.
     """
     import random
 
-    import anthropic
+    from google import genai
 
     load_dotenv()
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
     results = json.loads(results_path.read_text())
     examples = results["examples"]
@@ -239,12 +296,11 @@ def run_judge(
             reference_note=example["reference_note"],
             generated_note=example["generated_note"],
             model=model,
-            effort=effort,
         )
         if score is not None:
             per_example_scores.append({"id": example["id"], **score})
         print(f"  judged {i + 1}/{len(examples)} (kept {len(per_example_scores)})")
-        if sleep_between_calls:
+        if sleep_between_calls and i < len(examples) - 1:
             time.sleep(sleep_between_calls)
 
     if not per_example_scores:
@@ -269,26 +325,29 @@ def run_judge(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Score generated clinical notes with an LLM judge (Anthropic API)."
+        description="Score generated clinical notes with an LLM judge (Gemini API)."
     )
     parser.add_argument("--results_path", type=Path, default=DEFAULT_RESULTS_PATH)
     parser.add_argument("--output_path", type=Path, default=None)
     parser.add_argument("--model", default=JUDGE_MODEL)
-    parser.add_argument("--effort", default="low", choices=["low", "medium", "high", "xhigh", "max"])
     parser.add_argument(
         "--sample_size",
         type=int,
         default=None,
         help="Judge only a random sample of this many examples (for a quick/cheap test run).",
     )
-    parser.add_argument("--sleep_between_calls", type=float, default=0.0)
+    parser.add_argument(
+        "--sleep_between_calls",
+        type=float,
+        default=4.0,
+        help="Seconds to sleep between calls, to stay under the free tier's rate limit.",
+    )
     args = parser.parse_args()
 
     run_judge(
         results_path=args.results_path,
         output_path=args.output_path,
         model=args.model,
-        effort=args.effort,
         sample_size=args.sample_size,
         sleep_between_calls=args.sleep_between_calls,
     )
