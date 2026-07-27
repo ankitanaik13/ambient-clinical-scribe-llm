@@ -11,7 +11,13 @@ be imported on a machine with no CUDA/no ML libs installed (e.g. for CLI/config 
 
 from __future__ import annotations
 
-BASE_MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
+BASE_MODEL_NAME = "NousResearch/Meta-Llama-3-8B-Instruct"
+# Ungated community mirror of meta-llama/Meta-Llama-3-8B-Instruct -- identical weights and
+# architecture, just hosted without Meta's access-request gate. Switched to this while
+# Meta's gated-access approval was pending; see README.md's "Base model note" (in the
+# Setup section) for the full explanation. Swap back to the meta-llama/ repo id here if/
+# when that approval clears -- everything else (tokenizer, chat template, HF_TOKEN usage)
+# is unaffected either way.
 
 
 def get_bnb_config():
@@ -43,7 +49,11 @@ def load_tokenizer(model_name: str, hf_token: str | None, padding_side: str = "r
 
     Args:
         model_name: HF Hub model id.
-        hf_token: HF access token (Llama 3 is a gated model).
+        hf_token: HF access token. Not required for the ungated NousResearch mirror this
+            project defaults to (see BASE_MODEL_NAME), but still worth setting -- HF rate-
+            limits/throttles anonymous downloads more aggressively than authenticated ones,
+            and an authenticated token is required if BASE_MODEL_NAME is ever pointed back
+            at the gated meta-llama/ repo.
         padding_side: "left" for batched generation (Phase 2/4 eval, so new tokens are
             generated contiguously at the end of every sequence in a batch), "right" for
             SFT training (Phase 3, so padding doesn't get interleaved into the label

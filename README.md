@@ -156,6 +156,15 @@ note.
 
 ## Setup & running the pipeline
 
+> **Base model note:** this project defaults to `NousResearch/Meta-Llama-3-8B-Instruct`
+> (see `BASE_MODEL_NAME` in `src/model_utils.py`) rather than Meta's own
+> `meta-llama/Meta-Llama-3-8B-Instruct` repo. NousResearch's is a community-hosted mirror
+> of the exact same weights and architecture, published without Meta's access-request
+> gate — used here because that gated-access approval was still pending at the time. This
+> doesn't change anything downstream (tokenizer, chat template, generation behavior are
+> all identical); if Meta's approval clears later, switching `BASE_MODEL_NAME` back is a
+> one-line change.
+
 ### 1. Environment
 
 ```bash
@@ -187,7 +196,7 @@ Fill in:
 
 | Key | Used by |
 |---|---|
-| `HF_TOKEN` | `baseline_eval.py`, `finetune.py` — Llama 3 is a gated HF model |
+| `HF_TOKEN` | `baseline_eval.py`, `finetune.py` — not required for the ungated NousResearch mirror this project defaults to, but still recommended: HF throttles anonymous downloads more aggressively than authenticated ones, and it's required if `BASE_MODEL_NAME` is ever pointed back at Meta's gated repo |
 | `WANDB_API_KEY` | `baseline_eval.py`, `finetune.py`, `finetuned_eval.py` — experiment logging |
 | `GEMINI_API_KEY` | `llm_judge.py` — LLM-judge scoring (Google AI Studio, free tier, no credit card required) |
 
