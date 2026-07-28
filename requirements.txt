@@ -6,7 +6,16 @@ python-dotenv>=1.0
 
 # --- Phase 2: baseline zero-shot evaluation ---
 torch>=2.1
-transformers>=4.40
+# Capped below 4.46: that release renamed Trainer.__init__'s `tokenizer=` argument to
+# `processing_class=` with NO backward-compatible kwarg -- passing `tokenizer=` to
+# transformers>=4.46 raises `TypeError: Trainer.__init__() got an unexpected keyword
+# argument 'tokenizer'`. Our pinned trl<0.12 (below) unconditionally passes `tokenizer=`
+# into Trainer.__init__ under the hood (that's what SFTTrainer(tokenizer=...) does), so
+# trl<0.12 and transformers>=4.46 are mutually incompatible -- confirmed by constructing a
+# real SFTTrainer (tiny CPU model) against transformers==4.45.2 (works) and
+# transformers==5.14.1 (raises the exact TypeError above). If you ever migrate off the
+# pre-0.12 SFTTrainer API (see the trl comment below), this upper bound can come off too.
+transformers>=4.40,<4.46
 bitsandbytes>=0.43
 accelerate>=0.30
 rouge-score>=0.1.2
@@ -16,7 +25,8 @@ wandb>=0.17
 peft>=0.11
 # Capped below 0.12: that release moved SFTTrainer args (max_seq_length, dataset_text_field,
 # packing) into a separate SFTConfig class and renamed tokenizer= to processing_class=.
-# src/train/finetune.py is written against the pre-0.12 SFTTrainer(...) API.
+# src/train/finetune.py is written against the pre-0.12 SFTTrainer(...) API. This pin and
+# transformers' upper bound above are a matched pair -- see that comment for why.
 trl>=0.9,<0.12
 datasets>=2.18
 
