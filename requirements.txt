@@ -6,16 +6,33 @@ python-dotenv>=1.0
 
 # --- Phase 2: baseline zero-shot evaluation ---
 torch>=2.1
-# Capped below 4.46: that release renamed Trainer.__init__'s `tokenizer=` argument to
-# `processing_class=` with NO backward-compatible kwarg -- passing `tokenizer=` to
-# transformers>=4.46 raises `TypeError: Trainer.__init__() got an unexpected keyword
-# argument 'tokenizer'`. Our pinned trl<0.12 (below) unconditionally passes `tokenizer=`
-# into Trainer.__init__ under the hood (that's what SFTTrainer(tokenizer=...) does), so
-# trl<0.12 and transformers>=4.46 are mutually incompatible -- confirmed by constructing a
-# real SFTTrainer (tiny CPU model) against transformers==4.45.2 (works) and
-# transformers==5.14.1 (raises the exact TypeError above). If you ever migrate off the
-# pre-0.12 SFTTrainer API (see the trl comment below), this upper bound can come off too.
-transformers>=4.40,<4.46
+# EXACT pins below (transformers, trl), not ranges -- ranges are what caused this. Two
+# separate incidents on two separate fresh installs:
+#   1. transformers>=4.46 renamed Trainer.__init__'s `tokenizer=` arg to `processing_class=`
+#      with NO backward-compatible kwarg. Our trl (<0.12) unconditionally passes
+#      `tokenizer=` into Trainer.__init__ (that's what SFTTrainer(tokenizer=...) does under
+#      the hood), so any transformers>=4.46 breaks it with
+#      `TypeError: Trainer.__init__() got an unexpected keyword argument 'tokenizer'`.
+#   2. Separately, trl's sft_trainer.py unconditionally does
+#      `from liger_kernel.transformers import AutoLigerKernelForCausalLM` whenever
+#      liger-kernel happens to be importable. liger-kernel>=0.7.0 hard-requires
+#      transformers>=4.52.0 (raises its own ImportError otherwise) -- so if a liger-kernel
+#      that new is ALREADY present in the runtime (e.g. Colab's base image ships one; it is
+#      NOT a dependency of anything in this file), it collides with pin #1 above. This
+#      project doesn't use liger-kernel's fused kernels -- trl only imports it
+#      opportunistically -- so the fix is to make sure it's ABSENT, not to pin a version:
+#      `pip uninstall -y liger-kernel` after `pip install -r requirements.txt` (see
+#      README.md's Environment section). We could not verify a liger-kernel version pin
+#      against transformers==4.45.2 ourselves -- liger-kernel depends on `triton`, which has
+#      no macOS wheels, so it cannot be installed on a CUDA-less dev machine at all, under
+#      any version. Excluding it is the only fix we could actually verify end-to-end.
+# Verified in a genuinely fresh venv (`pip install -r requirements.txt` from scratch, no
+# pre-installed packages reused): transformers==4.45.2 + trl==0.11.4 + rich (below) resolve
+# together, liger-kernel is not pulled in by anything here, and both
+# `from trl import DataCollatorForCompletionOnlyLM, SFTTrainer` and a real SFTTrainer(...)
+# construction (matching src/train/finetune.py's exact call signature) succeed with zero
+# import errors.
+transformers==4.45.2
 bitsandbytes>=0.43
 accelerate>=0.30
 rouge-score>=0.1.2
@@ -23,11 +40,15 @@ wandb>=0.17
 
 # --- Phase 3: QLoRA fine-tuning ---
 peft>=0.11
-# Capped below 0.12: that release moved SFTTrainer args (max_seq_length, dataset_text_field,
-# packing) into a separate SFTConfig class and renamed tokenizer= to processing_class=.
-# src/train/finetune.py is written against the pre-0.12 SFTTrainer(...) API. This pin and
-# transformers' upper bound above are a matched pair -- see that comment for why.
-trl>=0.9,<0.12
+# EXACT pin, paired with transformers==4.45.2 above -- see that comment for the full
+# reasoning (both the tokenizer=/processing_class= break and the liger-kernel conflict).
+# src/train/finetune.py is written against this pre-0.12 SFTTrainer(...) API
+# (max_seq_length/dataset_text_field/tokenizer= passed directly, not via SFTConfig).
+trl==0.11.4
+# Hard dependency of trl.trainer.utils (`from rich.console import Console`), imported
+# unconditionally -- not declared by trl's own package metadata as far as we could tell,
+# and easy to miss if a dev environment already has some other package pulling rich in.
+rich>=13.0
 datasets>=2.18
 
 # --- Phase 4: LLM-judge comparison + report ---

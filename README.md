@@ -171,6 +171,7 @@ note.
 conda create -n ambient-scribe python=3.10 -y
 conda activate ambient-scribe
 pip install -r requirements.txt
+pip uninstall -y liger-kernel   # see note below -- skip if the uninstall says "not installed"
 ```
 
 `requirements.txt` is organized by phase. Phase 1 (data) and the CPU-safe parts of
@@ -181,6 +182,16 @@ project was developed against that constraint: code and CLIs were written and va
 on a CUDA-less machine with lazy imports and mocked models, and are meant to actually
 execute on a free-tier Colab T4 (see the sizing comments in `src/train/finetune.py`) or a
 rented GPU box.
+
+> **On Colab specifically, run the `pip uninstall -y liger-kernel` line above.** Colab's
+> base runtime image ships its own `liger-kernel`, which is not a dependency of anything
+> in `requirements.txt` and so is never touched by `pip install -r requirements.txt` —
+> but `trl`'s `SFTTrainer` (used by `src/train/finetune.py`) opportunistically imports it
+> if present, and Colab's pre-installed version hard-requires `transformers>=4.52`, which
+> conflicts with this project's pinned `transformers==4.45.2` (see the comment in
+> `requirements.txt` for the full history). This project doesn't use liger-kernel's fused
+> kernels — trl only reaches for it if it happens to be importable — so removing it is a
+> deliberate, no-downside fix, not a workaround.
 
 `vllm` (used only by `src/serve/serve_vllm.py`) is deliberately **not** in
 `requirements.txt` — install it separately on whatever GPU box you serve from; see that
