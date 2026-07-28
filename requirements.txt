@@ -39,7 +39,12 @@ rouge-score>=0.1.2
 wandb>=0.17
 
 # --- Phase 3: QLoRA fine-tuning ---
-peft>=0.11
+# EXACT pin (was peft>=0.11) -- peft's own version is what determines the minimum torchao
+# it will accept (see the torchao comment below), so leaving this as an open-ended range
+# risks the exact same category of conflict resurfacing the next time a fresh install
+# resolves a newer peft with a different torchao floor. Pinned together with, and verified
+# against, transformers==4.45.2 / trl==0.11.4 / torchao==0.16.0 in this file.
+peft==0.20.0
 # EXACT pin, paired with transformers==4.45.2 above -- see that comment for the full
 # reasoning (both the tokenizer=/processing_class= break and the liger-kernel conflict).
 # src/train/finetune.py is written against this pre-0.12 SFTTrainer(...) API
@@ -49,6 +54,21 @@ trl==0.11.4
 # unconditionally -- not declared by trl's own package metadata as far as we could tell,
 # and easy to miss if a dev environment already has some other package pulling rich in.
 rich>=13.0
+# EXACT pin. peft==0.20.0's LoRA layer-dispatch logic (src/train/merge_adapter.py's
+# PeftModel.from_pretrained(...).merge_and_unload() path) unconditionally probes
+# is_torchao_available() for every target module, regardless of whether the model
+# actually uses torchao quantization (we use bitsandbytes, not torchao) -- and that probe
+# raises `ImportError: Found an incompatible version of torchao` if some torchao IS
+# installed but below peft's required 0.16.0. Colab's base image ships torchao==0.10.0,
+# which is not a dependency of anything in this file, so `pip install -r requirements.txt`
+# alone doesn't fix it -- this explicit pin forces the upgrade. 0.16.0 (peft's literal
+# floor) was chosen over a newer version to keep the jump as small as possible; it resolved
+# with zero new conflicts (`pip check` clean) in a fresh venv alongside every other pin in
+# this file. Verified against the ACTUAL merge code path, not just pip resolution: built a
+# tiny Llama-architecture model + LoRA adapter, ran it through
+# PeftModel.from_pretrained(...).merge_and_unload() (peft==0.20.0, torchao==0.16.0) end to
+# end, and confirmed the merged weights actually changed (not a silent no-op).
+torchao==0.16.0
 datasets>=2.18
 
 # --- Phase 4: LLM-judge comparison + report ---
