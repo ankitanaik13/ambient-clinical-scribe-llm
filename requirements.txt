@@ -73,9 +73,12 @@ datasets>=2.18
 
 # --- Phase 4: LLM-judge comparison + report ---
 # Gemini (google-genai), not Anthropic -- Google AI Studio's free tier needs no credit
-# card, which matters for a portfolio project with no billing account set up. gemini-2.5-flash
-# was picked among the free-tier models for its higher daily quota (grading ~800 examples
-# per full comparison run). See src/eval/llm_judge.py's docstring for the full reasoning.
+# card, which matters for a portfolio project with no billing account set up. The
+# flash-class model was picked among the free-tier models for its higher daily quota
+# (grading ~800 examples per full comparison run); src/eval/llm_judge.py calls it via the
+# rolling "gemini-flash-latest" alias rather than a dated snapshot, since a previously-used
+# pinned snapshot got retired out from under this project once already. See that file's
+# docstring for the full reasoning.
 google-genai>=1.0
 matplotlib>=3.8
 

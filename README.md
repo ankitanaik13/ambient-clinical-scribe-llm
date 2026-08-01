@@ -99,7 +99,7 @@ baseline_results.json  finetuned_results.json
               v
    +--------------------------------------+
    |  src/eval/llm_judge.py                |
-   |  gemini-2.5-flash as judge:            |
+   |  gemini-flash-latest as judge:         |
    |  completeness, factual correctness,    |
    |  hallucination, structural adherence   |
    +--------------------------------------+
@@ -150,7 +150,7 @@ note.
 | Fine-tuning | `peft` (LoRA), `trl` (`SFTTrainer`) |
 | Experiment tracking | Weights & Biases |
 | Automatic metrics | `rouge-score` |
-| LLM-judge + report | Gemini API via `google-genai` (`gemini-2.5-flash`), `matplotlib` |
+| LLM-judge + report | Gemini API via `google-genai` (`gemini-flash-latest`), `matplotlib` |
 | Serving | FastAPI, `uvicorn`, `vllm` (optional, GPU-only path) |
 | Testing | `pytest`, FastAPI `TestClient` |
 

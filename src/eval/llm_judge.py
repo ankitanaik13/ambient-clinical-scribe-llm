@@ -7,14 +7,14 @@ dialogue transcript (the actual source of truth for what happened in the encount
 the reference note, since the reference is a single human-written example of an acceptable
 note, not ground truth for hallucination detection.
 
-Uses gemini-2.5-flash via the `google-genai` SDK (the current official SDK -- NOT the
-deprecated `google-generativeai` package). This project originally used the Anthropic API
-here; it was switched to Gemini specifically because Google AI Studio's free tier requires
-no credit card, which matters for a portfolio project with no billing account. Within
-Google's free-tier models, gemini-2.5-flash was picked for having the highest free daily
-quota available, since this project judges up to 800 examples total (baseline + fine-tuned,
-400 each) -- quota headroom matters more than raw model capability for a grading task like
-this one.
+Uses Gemini's flash-class model via the `google-genai` SDK (the current official SDK --
+NOT the deprecated `google-generativeai` package). This project originally used the
+Anthropic API here; it was switched to Gemini specifically because Google AI Studio's free
+tier requires no credit card, which matters for a portfolio project with no billing
+account. Within Google's free-tier models, the flash class was picked for having the
+highest free daily quota available, since this project judges up to 800 examples total
+(baseline + fine-tuned, 400 each) -- quota headroom matters more than raw model capability
+for a grading task like this one.
 
 Structured output is enforced via `response_mime_type="application/json"` +
 `response_schema=JudgeScore` (a Pydantic model) on GenerateContentConfig -- Gemini's
@@ -47,9 +47,16 @@ from pydantic import BaseModel
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_PATH = PROJECT_ROOT / "outputs" / "metrics" / "baseline_results.json"
 
-# gemini-2.5-flash: highest free-tier daily quota among Google AI Studio's models, chosen
-# specifically for grading up to 800 examples per full baseline+finetuned comparison run.
-JUDGE_MODEL = "gemini-2.5-flash"
+# Rolling alias, not a pinned dated snapshot: "gemini-2.5-flash" previously used here 404'd
+# ("no longer available to new users") once Google retired that specific snapshot out from
+# under existing code. "gemini-flash-latest" always points at Google's current recommended
+# flash-class model instead. This is a deliberate contrast with the exact `==` pins in
+# requirements.txt -- those pin local packages where reproducibility is the point (the same
+# version must behave the same way on every install); this is a call to a hosted API we
+# don't control the lifecycle of, where pinning to a specific snapshot just means the code
+# silently breaks the day Google retires it. An alias trades a little version-to-version
+# score drift (acceptable for an LLM-judge rubric) for the code not going stale on its own.
+JUDGE_MODEL = "gemini-flash-latest"
 
 JUDGE_SYSTEM_PROMPT = """You are an expert clinical documentation auditor. You will be shown a \
 doctor-patient dialogue transcript and a clinical note section an AI system generated from it, \
