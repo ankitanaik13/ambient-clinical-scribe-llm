@@ -56,6 +56,12 @@ DEFAULT_RESULTS_PATH = PROJECT_ROOT / "outputs" / "metrics" / "baseline_results.
 # don't control the lifecycle of, where pinning to a specific snapshot just means the code
 # silently breaks the day Google retires it. An alias trades a little version-to-version
 # score drift (acceptable for an LLM-judge rubric) for the code not going stale on its own.
+#
+# As of live testing on 2026-07-31, this alias resolved to "gemini-3.6-flash"
+# (response.model_version) -- noted as a concrete reference point for future debugging,
+# not a guarantee: the whole point of using the alias is that this will keep changing.
+# See judge_one()'s thinking_config comment for a concrete example of an accepted-parameter
+# shift this alias already caused once.
 JUDGE_MODEL = "gemini-flash-latest"
 
 JUDGE_SYSTEM_PROMPT = """You are an expert clinical documentation auditor. You will be shown a \
@@ -126,6 +132,20 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return any(marker in message for marker in ("429", "resource_exhausted", "rate limit", "quota"))
 
 
+def _is_thinking_config_error(exc: Exception) -> bool:
+    """Detect the specific 400 INVALID_ARGUMENT that means the model rejected
+    `thinking_config`, as opposed to some other malformed-request bug.
+
+    Confirmed via live testing against the real API (2026-07-31): "gemini-flash-latest"
+    resolved to "gemini-3.6-flash" at that time, which 400s on `thinking_budget=0`
+    specifically (`status="INVALID_ARGUMENT"`) but accepts `thinking_budget=-1` (dynamic
+    thinking) and small positive values. Matching on both `code` and `status` -- not just
+    "any 400" -- so an unrelated malformed-request bug (e.g. a broken response_schema)
+    isn't silently swallowed by the thinking_config-less retry in judge_one.
+    """
+    return getattr(exc, "code", None) == 400 and getattr(exc, "status", None) == "INVALID_ARGUMENT"
+
+
 def call_with_retry(fn, max_retries: int = 5, base_delay: float = 5.0, max_delay: float = 60.0):
     """Call fn(), retrying with exponential backoff on rate-limit errors only.
 
@@ -181,7 +201,30 @@ def judge_one(
     """
     from google.genai import types
 
-    def _call():
+    def _build_config(include_thinking: bool):
+        kwargs = dict(
+            system_instruction=JUDGE_SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=JudgeScore,
+        )
+        if include_thinking:
+            # thinking_budget=-1 = dynamic thinking, letting the model decide how much
+            # reasoning each grading call needs, rather than a fixed number -- chosen
+            # (confirmed via live testing, 2026-07-31) over a fixed small positive budget
+            # as the more robust default across whatever model "gemini-flash-latest"
+            # resolves to next, since that number would otherwise need re-verifying every
+            # time the alias moves. NOTE: thinking_budget=0 (meant as "disable thinking",
+            # mirroring this project's earlier low-effort choice when the judge was Claude
+            # Sonnet) is REJECTED outright by the model "gemini-flash-latest" currently
+            # resolves to (gemini-3.6-flash, as of 2026-07-31) -- 0 isn't "off" for that
+            # model, it's just invalid. Rolling aliases mean the set of accepted
+            # thinking_budget values can shift under this code without warning; if this
+            # value ever starts failing too, see _is_thinking_config_error's fallback below
+            # before assuming the whole request is broken.
+            kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
+        return types.GenerateContentConfig(**kwargs)
+
+    def _call(include_thinking: bool):
         return client.models.generate_content(
             model=model,
             contents=USER_PROMPT_TEMPLATE.format(
@@ -189,22 +232,21 @@ def judge_one(
                 reference_note=reference_note,
                 generated_note=generated_note,
             ),
-            config=types.GenerateContentConfig(
-                system_instruction=JUDGE_SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=JudgeScore,
-                # Bulk grading over hundreds of examples doesn't need Gemini 2.5 Flash's
-                # dynamic thinking -- disabling it keeps latency/cost down, mirroring this
-                # project's earlier low-effort choice when the judge was Claude Sonnet.
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+            config=_build_config(include_thinking),
         )
 
     try:
-        response = call_with_retry(_call)
+        response = call_with_retry(lambda: _call(True))
     except Exception as exc:
-        print(f"  [judge_one] API error, skipping example: {exc}")
-        return None
+        if not _is_thinking_config_error(exc):
+            print(f"  [judge_one] API error, skipping example: {exc}")
+            return None
+        print(f"  [judge_one] thinking_config rejected (400 INVALID_ARGUMENT) -- retrying without it: {exc}")
+        try:
+            response = call_with_retry(lambda: _call(False))
+        except Exception as exc2:
+            print(f"  [judge_one] API error on thinking_config-less retry, skipping example: {exc2}")
+            return None
 
     if not response.candidates:
         print("  [judge_one] no candidates in response (possibly blocked), skipping")
